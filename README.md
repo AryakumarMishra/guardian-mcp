@@ -17,7 +17,7 @@ Every tool call - executed, pending, confirmed, expired, cancelled, or denied - 
 
 ## Rough Architecture Diagram
 
-![Guardina-MCP-Architectue](image/guardian_mcp_architecture.png)
+![Guardian-MCP-Architectue](image/guardian_mcp_architecture.png)
  
 ## Project structure
  
