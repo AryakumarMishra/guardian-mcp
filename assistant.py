@@ -8,7 +8,8 @@ GuardianAssistant: the domain logic (reminders, messages, smart devices) plus th
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
- 
+from storage import JSONStore
+
 from policy import RiskTier, CONFIRMATION_TTL_SECONDS
 
 
@@ -22,8 +23,6 @@ class GuardianError(Exception):
 # Guardian Assistant class
 class GuardianAssistant:
     def __init__(self, data_dir: str = "data"):
-        from storage import JSONStore
- 
         self.reminders = JSONStore(f"{data_dir}/reminders.json", [])
         self.messages = JSONStore(f"{data_dir}/messages.json", [])
         self.devices = JSONStore(
