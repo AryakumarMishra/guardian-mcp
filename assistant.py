@@ -6,6 +6,7 @@ GuardianAssistant: the domain logic (reminders, messages, smart devices) plus th
 """
 
 import uuid
+import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 from storage import JSONStore
@@ -23,6 +24,10 @@ class GuardianError(Exception):
 # Guardian Assistant class
 class GuardianAssistant:
     def __init__(self, data_dir: str = "data"):
+        # if data_dir in None:
+        #     data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
+        # self.data_dir = data_dir
         self.reminders = JSONStore(f"{data_dir}/reminders.json", [])
         self.messages = JSONStore(f"{data_dir}/messages.json", [])
         self.devices = JSONStore(
@@ -42,12 +47,14 @@ class GuardianAssistant:
         status: str,
         result: Any = None,
     ) -> Dict[str, Any]:
+
+        risk_tier_value = tier.value if isinstance(tier, RiskTier) else str(tier)
         entry = {
             "id": str(uuid.uuid4()),
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "tool": tool,
             "arguments": arguments,
-            "risk_tier": tier.value,
+            "risk_tier": risk_tier_value,
             "status": status,  # executed | pending_confirmation | confirmed_and_executed | expired | cancelled | denied
             "result": result,
         }
