@@ -66,4 +66,4 @@ TOOL_POLICY = {
 def get_tier(tool_name: str) -> RiskTier:
     """Look up the tool's risk tier. unknown tools are automatically flagged high risk"""
     entry = TOOL_POLICY.get(tool_name)
-    return [entry] if entry else RiskTier.HIGH
+    return entry["tier"] if entry else RiskTier.HIGH

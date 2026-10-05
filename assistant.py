@@ -7,7 +7,8 @@ GuardianAssistant: the domain logic (reminders, messages, smart devices) plus th
 
 import uuid
 import os
-from datetime import datetime, timedelta
+import datetime
+from datetime import timedelta
 from typing import Any, Dict, Optional
 from storage import JSONStore
 
@@ -24,10 +25,10 @@ class GuardianError(Exception):
 # Guardian Assistant class
 class GuardianAssistant:
     def __init__(self, data_dir: str = "data"):
-        # if data_dir in None:
-        #     data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+        if data_dir is None:
+            data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
-        # self.data_dir = data_dir
+        self.data_dir = data_dir
         self.reminders = JSONStore(f"{data_dir}/reminders.json", [])
         self.messages = JSONStore(f"{data_dir}/messages.json", [])
         self.devices = JSONStore(
@@ -51,7 +52,7 @@ class GuardianAssistant:
         risk_tier_value = tier.value if isinstance(tier, RiskTier) else str(tier)
         entry = {
             "id": str(uuid.uuid4()),
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
             "tool": tool,
             "arguments": arguments,
             "risk_tier": risk_tier_value,
@@ -119,7 +120,7 @@ class GuardianAssistant:
             "id": str(uuid.uuid4()),
             "to": to,
             "body": body,
-            "sent_at": datetime.utcnow().isoformat() + "Z",
+            "sent_at": datetime.datetime.now(datetime.timezone.utc).isoformat() + "Z",
         }
         messages.append(msg)
         self.messages.write(messages)
@@ -146,7 +147,7 @@ class GuardianAssistant:
         self._pending[confirmation_id] = {
             "tool": tool,
             "arguments": arguments,
-            "expires_at": datetime.now(datetime.timezone.utc) + timedelta(seconds=CONFIRMATION_TTL_SECONDS),
+            "expires_at": datetime.datetime.now(datetime.timezone.utc) + timedelta(seconds=CONFIRMATION_TTL_SECONDS),
         }
         self._record(tool, arguments, RiskTier.HIGH, "pending_confirmation", {"confirmation_id": confirmation_id})
         return confirmation_id
@@ -155,7 +156,7 @@ class GuardianAssistant:
         pending = self._pending.get(confirmation_id)
         if pending is None:
             raise GuardianError("Unknown or already-used confirmation id.")
-        if datetime.now(datetime.timezone.utc) > pending["expires_at"]:
+        if datetime.datetime.now(datetime.timezone.utc) > pending["expires_at"]:
             del self._pending[confirmation_id]
             self._record(pending["tool"], pending["arguments"], RiskTier.HIGH, "expired")
             raise GuardianError("Confirmation window expired - re-issue the original tool call.")

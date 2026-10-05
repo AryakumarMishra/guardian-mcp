@@ -27,16 +27,26 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import server as mcp
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1:8b")
 MAX_TOOL_ROUNDS = 4
 
 SYSTEM_PROMPT = (
     "You are a helpful home voice assistant with tools for reminders, "
-    "sending messages, and a smart lock. Always use a tool to answer "
-    "questions or take actions - never claim you did something without "
-    "calling the matching tool. If a tool result says a confirmation is "
-    "required, tell the user plainly what you want to do and that it needs "
-    "their approval in the app - do not say the action is done."
+    "sending messages, and a smart lock.\n\n"
+    "Hard rules:\n"
+    "1. Never invent an id. To delete or update a reminder, first call "
+    "list_reminders and use the exact 'id' field from its results - never "
+    "use a placeholder or made-up id. To act on a device, first call "
+    "get_devices and use the exact 'id' field from its results.\n"
+    "2. If a tool call returns an error, read the error message and retry "
+    "with corrected arguments. Do not give up and invent a workaround.\n"
+    "3. There is no separate app. Everything happens through these tools "
+    "and this chat. Never mention a 'Guardian Assistant app' or any other "
+    "product that doesn't exist - if you're unsure what to do, ask the "
+    "user a direct question instead.\n"
+    "4. If a tool result says a confirmation is required, tell the user "
+    "plainly what you want to do and that it needs their approval via the "
+    "Confirm/Cancel buttons in this chat - do not say the action is done."
 )
 
 app = FastAPI(title="Guardian MCP - web simulator")
