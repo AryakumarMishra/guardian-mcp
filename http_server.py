@@ -7,11 +7,12 @@ import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 
@@ -109,7 +110,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -127,7 +128,7 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat() + "Z"}
+    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}
 
 
 @app.post("/mcp")
@@ -155,8 +156,8 @@ async def mcp_sse(request: Request):
             await asyncio.sleep(30)
             yield f"data: {json.dumps({'type': 'ping'})}\n\n"
 
-    return Response(
-        content=event_stream(),
+    return StreamingResponse(
+        event_stream(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "Mcp-Session-Id": session_id},
     )

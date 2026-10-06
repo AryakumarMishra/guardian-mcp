@@ -44,19 +44,34 @@ TOOL_POLICY = {
     },
     "update_reminder": {
         "tier": RiskTier.MODERATE,
-        "description": "Update an existing reminder's text, due date, or done state.",
+        "description": (
+            "Update an existing reminder's text, due date, or done state. "
+            "reminder_id must be an exact 'id' from list_reminders - call list_reminders first, never invent or ask the user for an id."
+        ),
     },
     "delete_reminder": {
         "tier": RiskTier.HIGH,
-        "description": "Permanently delete a reminder. Irreversible.",
+        "description": (
+            "Permanently delete a reminder. Irreversible. "
+            "reminder_id must be an exact 'id' from list_reminders - call list_reminders first, never invent or ask the user for an id. "
+            "HIGH risk: needs human confirmation, never executes immediately."
+        ),
     },
     "send_message": {
         "tier": RiskTier.HIGH,
-        "description": "Send a message to a contact on the user's behalf. Irreversible once sent.",
+        "description": (
+            "Send a message to a contact on the user's behalf. Irreversible once sent. "
+            "HIGH risk: needs human confirmation, never executes immediately."
+        ),
     },
     "unlock_smart_lock": {
         "tier": RiskTier.HIGH,
-        "description": "Unlock a physical smart lock. Has real-world physical consequences.",
+        "description": (
+            "Unlock a physical smart lock. Has real-world physical consequences. "
+            "device_id must be an exact 'id' from get_devices (e.g. 'front_door' for the Front door) - call get_devices first, never invent or ask the user for an id. "
+            "'front door', 'front-door', 'main door' all mean device 'front_door'. "
+            "HIGH risk: needs human confirmation, never executes immediately."
+        ),
     },
 }
 

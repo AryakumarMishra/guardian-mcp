@@ -31,6 +31,8 @@
   .tier.high { background: #f4dcd8; color: #9a2f24; }
   .pending-actions { margin-top: 6px; display: flex; gap: 6px; }
   .pending-actions button { padding: 4px 10px; font-size: 12px; }
+  .empty-hint { font-size: 12px; color: #7a7461; padding: 6px 2px; }
+  #pending-feed .card { border-color: #d9a49d; background: #fdf6f4; }
   pre { white-space: pre-wrap; word-break: break-word; margin: 4px 0 0; font-family: ui-monospace, monospace; font-size: 11.5px; color: #55503f; }
   .toolbar { display: flex; justify-content: flex-end; padding: 8px 14px; border-top: 1px solid #e3e0d8; }
 </style>
@@ -52,6 +54,10 @@
   </div>
 
   <div class="right-stack">
+    <div class="panel" style="flex:0 0 auto; max-height: 32%">
+      <h2>Pending approvals (human required for HIGH risk)</h2>
+      <div id="pending-feed"></div>
+    </div>
     <div class="panel" style="flex:1">
       <h2>Tool activity</h2>
       <div id="tool-feed"></div>
@@ -70,6 +76,7 @@ let history = [];
 const chatEl = document.getElementById('chat');
 const toolFeedEl = document.getElementById('tool-feed');
 const auditFeedEl = document.getElementById('audit-feed');
+const pendingFeedEl = document.getElementById('pending-feed');
 
 function addMsg(role, text) {
   const div = document.createElement('div');
@@ -86,8 +93,18 @@ function renderToolTrace(trace) {
     let resultObj = null;
     try { resultObj = JSON.parse(call.result); } catch (e) {}
     const pending = resultObj && resultObj.status === 'confirmation_required';
-    card.innerHTML = `<strong>${call.name}</strong>${call.isError ? ' <span class="tier high">error</span>' : ''}
-      <pre>${call.result}</pre>`;
+    const title = document.createElement('strong');
+    title.textContent = call.name;
+    card.appendChild(title);
+    if (call.isError) {
+      const badge = document.createElement('span');
+      badge.className = 'tier high';
+      badge.textContent = 'error';
+      card.appendChild(badge);
+    }
+    const pre = document.createElement('pre');
+    pre.textContent = call.result;
+    card.appendChild(pre);
     if (pending) {
       const actions = document.createElement('div');
       actions.className = 'pending-actions';
@@ -112,9 +129,60 @@ async function resolveAction(confirmationId, action, card) {
   const note = document.createElement('div');
   note.style.marginTop = '6px';
   note.style.fontSize = '12px';
-  note.textContent = data.error ? `Error: ${data.error}` : `${action === 'confirm' ? 'Confirmed' : 'Cancelled'}.`;
+  note.textContent = data.error ? `Error: ${data.error}` : (data.followup || `${action === 'confirm' ? 'Confirmed' : 'Cancelled'}.`);
   card.appendChild(note);
+  // Keep the LLM in sync: record the human's decision as chat context so the
+  // next turn doesn't still think the action is pending.
+  const syncMsg = data.error
+    ? `Human tried to ${action} HIGH-risk action ${confirmationId} but it failed: ${data.error}`
+    : `Human ${action === 'confirm' ? 'CONFIRMED and executed' : 'CANCELLED'} HIGH-risk action ${confirmationId}: ${data.followup || ''}`;
+  history.push({ role: 'user', content: syncMsg });
+  addMsg('assistant', note.textContent);
   loadAuditLog();
+  loadPending();
+}
+
+async function loadPending() {
+  let pendings = [];
+  try {
+    const res = await fetch('/agent/pending');
+    pendings = await res.json();
+  } catch (e) { pendings = []; }
+  pendingFeedEl.innerHTML = '';
+  if (!pendings.length) {
+    const hint = document.createElement('div');
+    hint.className = 'empty-hint';
+    hint.textContent = 'No pending actions. If the assistant asked for confirmation but no Confirm button is here, the action was never staged (usually a bad or missing id) - ask it to retry with a fresh lookup.';
+    pendingFeedEl.appendChild(hint);
+    return;
+  }
+  for (const p of pendings) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    const title = document.createElement('strong');
+    title.textContent = p.tool;
+    const badge = document.createElement('span');
+    badge.className = 'tier high';
+    badge.textContent = 'awaiting confirmation';
+    const args = document.createElement('pre');
+    args.textContent = JSON.stringify(p.arguments) + `\nExpires in ~${p.expires_in_seconds}s`;
+    const actions = document.createElement('div');
+    actions.className = 'pending-actions';
+    const confirmBtn = document.createElement('button');
+    confirmBtn.textContent = 'Confirm';
+    confirmBtn.onclick = () => resolveAction(p.confirmation_id, 'confirm', card);
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'danger';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = () => resolveAction(p.confirmation_id, 'cancel', card);
+    actions.appendChild(confirmBtn);
+    actions.appendChild(cancelBtn);
+    card.appendChild(title);
+    card.appendChild(badge);
+    card.appendChild(args);
+    card.appendChild(actions);
+    pendingFeedEl.appendChild(card);
+  }
 }
 
 async function loadAuditLog() {
@@ -124,9 +192,20 @@ async function loadAuditLog() {
   for (const entry of log.slice().reverse()) {
     const card = document.createElement('div');
     card.className = 'card';
-    card.innerHTML = `<strong>${entry.tool}</strong>
-      <span class="tier ${entry.risk_tier}">${entry.risk_tier}</span>
-      <div style="color:#7a7461;margin-top:2px">${entry.status} · ${new Date(entry.timestamp).toLocaleTimeString()}</div>`;
+    const tier = ['safe', 'moderate', 'high'].includes(entry.risk_tier) ? entry.risk_tier : 'high';
+    const title = document.createElement('strong');
+    title.textContent = entry.tool;
+    const badge = document.createElement('span');
+    badge.className = 'tier ' + tier;
+    badge.textContent = entry.risk_tier;
+    const meta = document.createElement('div');
+    meta.style.color = '#7a7461';
+    meta.style.marginTop = '2px';
+    const ts = new Date(entry.timestamp);
+    meta.textContent = `${entry.status} · ${isNaN(ts) ? entry.timestamp : ts.toLocaleTimeString()}`;
+    card.appendChild(title);
+    card.appendChild(badge);
+    card.appendChild(meta);
     auditFeedEl.appendChild(card);
   }
 }
@@ -151,8 +230,13 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
   }
   history = data.history;
   addMsg('assistant', data.reply);
+  if (data.pending_confirmation) {
+    const p = data.pending_confirmation;
+    addMsg('assistant', `⏳ HIGH-risk '${p.tool}' needs your decision (expires in ~${p.expires_in_seconds}s). Use Confirm / Cancel in Tool activity.`);
+  }
   renderToolTrace(data.tool_trace);
   loadAuditLog();
+  loadPending();
 });
 
 async function resetDemo() {
@@ -161,9 +245,12 @@ async function resetDemo() {
   toolFeedEl.innerHTML = '';
   history = [];
   loadAuditLog();
+  loadPending();
 }
 
 loadAuditLog();
+loadPending();
+setInterval(loadPending, 10000);
 </script>
 </body>
 </html>

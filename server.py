@@ -79,7 +79,7 @@ _TOOL_ARG_SCHEMAS = {
     "update_reminder": {
         "type": "object",
         "properties": {
-            "reminder_id": {"type": "string"},
+            "reminder_id": {"type": "string", "description": "Exact 'id' from list_reminders. Call list_reminders first."},
             "text": {"type": "string"},
             "due": {"type": "string"},
             "done": {"type": "boolean"},
@@ -88,7 +88,7 @@ _TOOL_ARG_SCHEMAS = {
     },
     "delete_reminder": {
         "type": "object",
-        "properties": {"reminder_id": {"type": "string"}},
+        "properties": {"reminder_id": {"type": "string", "description": "Exact 'id' from list_reminders. Call list_reminders first, never invent it."}},
         "required": ["reminder_id"],
     },
     "send_message": {
@@ -98,7 +98,12 @@ _TOOL_ARG_SCHEMAS = {
     },
     "unlock_smart_lock": {
         "type": "object",
-        "properties": {"device_id": {"type": "string"}},
+        "properties": {
+            "device_id": {
+                "type": "string",
+                "description": "Exact 'id' from get_devices, e.g. 'front_door'. Call get_devices first. Aliases 'front door', 'front-door', 'main door' also work.",
+            }
+        },
         "required": ["device_id"],
     },
 }
@@ -152,6 +157,86 @@ def _build_tool_list() -> List[ToolSchema]:
 _TOOLS = _build_tool_list()
 
 
+def _looks_like_placeholder(value: str) -> bool:
+    """Strict fail-closed check: placeholders are never valid ids.
+
+    Catches the small-model failure mode of sending literal text like
+    'id from the reminder to be deleted' instead of copying the exact
+    'id' from list_reminders/get_devices results.
+    """
+    if not isinstance(value, str):
+        return True
+    v = value.strip()
+    if not v:
+        return True
+    lowered = v.lower()
+    markers = ("id from", "reminder to", "from the reminder", "placeholder",
+               "example", "<", ">", "your-", "_id_here", "insert ", "todo")
+    if any(m in lowered for m in markers):
+        return True
+    if " " in v or len(v) > 80:
+        return True
+    return False
+
+
+# Lenient aliases for the small-model failure mode of using the result field
+# name ("id") instead of the tool argument name ("reminder_id"/"device_id").
+# Canonical names always win; aliases only fill in when canonical is absent.
+_ARG_ALIASES = {
+    "delete_reminder": {"reminder_id": ("id", "reminderId", "reminder-id")},
+    "update_reminder": {"reminder_id": ("id", "reminderId", "reminder-id")},
+    "unlock_smart_lock": {"device_id": ("id", "deviceId", "device-id", "device", "lock_id")},
+}
+
+
+def _apply_arg_aliases(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    arguments = dict(arguments or {})
+    for canonical, aliases in _ARG_ALIASES.get(name, {}).items():
+        if arguments.get(canonical) in (None, ""):
+            for a in aliases:
+                if arguments.get(a) not in (None, ""):
+                    arguments[canonical] = arguments[a]
+                    break
+        # Drop alias keys so method(**arguments) never sees duplicates.
+        for a in aliases:
+            arguments.pop(a, None)
+    return arguments
+
+
+def _validate_high_risk_args(name: str, arguments: Dict[str, Any]) -> Any:
+    """Return an error message if HIGH-risk args are clearly unexecutable, else None."""
+    from assistant import _normalize_device_id
+
+    if name == "delete_reminder":
+        rid = (arguments or {}).get("reminder_id")
+        if not rid or not isinstance(rid, str):
+            return "Missing 'reminder_id'. Call list_reminders first and use an exact 'id' from its results - never ask the user for an id."
+        if _looks_like_placeholder(rid):
+            return (
+                f"That 'reminder_id' ({rid!r}) looks like placeholder text, not a real id. "
+                "Copy the exact 'id' string from the list_reminders result above character-for-character "
+                "and retry delete_reminder with it - never paraphrase or describe the id."
+            )
+        if not assistant.has_reminder(rid):
+            return f"No reminder with id '{rid}'. Call list_reminders first and use an exact 'id' from its results."
+    elif name == "send_message":
+        to = (arguments or {}).get("to")
+        body = (arguments or {}).get("body")
+        if not to or not body:
+            return "Missing 'to' and/or 'body'. Both are required to send a message."
+    elif name == "unlock_smart_lock":
+        did = (arguments or {}).get("device_id")
+        if not did or not isinstance(did, str):
+            return "Missing 'device_id'. Call get_devices first and use an exact 'id' from its results - never ask the user for an id."
+        normalized = _normalize_device_id(did)
+        if not assistant.has_device(normalized):
+            return (
+                f"No device with id '{did}'. Valid ids: {assistant.valid_device_ids()}. "
+                "Call get_devices first and use an exact 'id' from its results."
+            )
+    return None
+
+
 
 
 # MCP handlers
@@ -188,7 +273,18 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
 
     tier = get_tier(name)
 
+    # Lenient alias mapping first (model often sends {"id": ...} instead of
+    # {"reminder_id": ...}); canonical names always win.
+    arguments = _apply_arg_aliases(name, arguments)
+
     if tier == RiskTier.HIGH:
+        # Fail fast on bad ids BEFORE creating a pending confirmation, so the
+        # LLM learns to call list_reminders/get_devices instead of asking the
+        # user for an id or requesting confirmation on something unexecutable.
+        validation_error = _validate_high_risk_args(name, arguments)
+        if validation_error is not None:
+            assistant._record(name, arguments, tier, "denied", validation_error)
+            return err(validation_error)
         confirmation_id = assistant.request_confirmation(name, arguments)
         return ok(
             {
